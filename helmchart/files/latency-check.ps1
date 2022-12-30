@@ -13,16 +13,12 @@ Param (
     [string] $SendAddress = "127.0.0.1",
     # Message to send
     [string] $Message = "Hello",
-    # key used for integrity / authentication
-    [string] $HmacKey = "changeit",
-    # key used to hide content
-    [byte[]] $AesKey,
     # switch to run a server
     [Alias("Server")]
     [switch] $RunServer
 )
 
-if ( ($null -eq $AesKey) -and ($null -ne $ENV:AES_KEY_B64) )
+if ( ($null -ne $ENV:AES_KEY_B64) )
 {
     $AesKey = [System.Convert]::FromBase64String($ENV:AES_KEY_B64)
 }
@@ -33,27 +29,33 @@ class Message {
     [byte[]] $Message
 
     Message([byte[]]$Message) {
+        $hmacsha = New-Object System.Security.Cryptography.HMACSHA256
+        $hmacsha.key = [Text.Encoding]::ASCII.GetBytes($ENV:HMAC_KEY_B64)
+        $this.HMAC = $hmacsha.ComputeHash([Text.Encoding]::ASCII.GetBytes($message))
         $this.IV = New-Object byte[] 16
         $this.Message = $Message
     }
 
     Message([byte[]]$Message, [System.Security.Cryptography.Aes]$Key) {
+        $this.HMAC = New-Object byte[] 32
         $this.IV = New-Object byte[] 16
-        $this.Plaintext = New-Object byte[] ($Message.Length - 16)
-        $ciphertext = New-Object byte[] ($Message.Length - 16)
-        [Array]::Copy($this.Message, $Key.IV, 16)
-        [Array]::Copy($this.Message, 16, $ciphertext, 0, ($Message.Length - 16))
-        # return $AES.DecryptCBC($ciphertext, $iv)
+        $this.Message = New-Object byte[] ($Message.Length - ($this.HMAC.Length + $this.IV.Length))
+        $ciphertext = New-Object byte[] ($Message.Length - ($this.HMAC.Length + $this.IV.Length))
+        $msgOffset = ($this.HMAC.Length + $this.IV.Length)
+        [Array]::Copy($Message, 0,              $this.IV,    0, $this.IV.Length)
+        [Array]::Copy($Message, $Key.IV.Length, $this.HMAC,  0, $this.HMAC.Length)
+        [Array]::Copy($Message, $msgOffset,     $ciphertext, 0, $Message.Length - $msgOffset)
+
+        $this.Message = $Key.DecryptCBC($ciphertext, $this.IV)
     }
 
     [byte[]]GetEncoded() {
-        return $this.IV + $this.Message
+        return $this.IV + $this.HMAC + $this.Message
     }
     
     [byte[]]GetEncoded([System.Security.Cryptography.Aes]$Key) {
         $this.IV = $Key.IV
-        # return $this.IV + $this.Message
-        return $this.IV + $Key.EncryptCbc($this.Message, $this.iv)
+        return $this.IV + $this.HMAC + $Key.EncryptCbc($this.Message, $this.iv)
     }
 }
 
@@ -61,7 +63,7 @@ $AES = [System.Security.Cryptography.Aes]::Create()
 if ( $null -ne $AesKey )
 {
     $AES.GenerateIV()
-    $AES.Key = $aesKey
+    $AES.Key = $AesKey
 }
 
 $encoder = [system.Text.Encoding]::UTF8
@@ -72,7 +74,7 @@ function Invoke-Ping {
     )
 
     $sendBytes = $encoder.GetBytes($Message)
-    
+    $sendBytes | Format-Hex | Out-String | Write-Debug
     if ($null -ne $aesKey) 
     {
         $sendBytes = [Message]::New($sendBytes).GetEncoded($AES)
@@ -121,33 +123,48 @@ function Start-PingServer {
         try 
         {
             $receiveBytes = $client.Receive([ref]$RemoteIpEndPoint)
-            
     
-            if ($null -ne $aesKey) 
+            $receiveBytes | Format-Hex | Out-String | Write-Debug
+            if ($null -ne $AesKey) 
             {
-                $iv = New-Object byte[] 16
-                $ciphertext = New-Object byte[] ($receiveBytes.Length - 16)
-                [Array]::Copy($receiveBytes, $iv, 16)
-                [Array]::Copy($receiveBytes, 16, $ciphertext, 0, ($receiveBytes.Length - 16))
-                $receiveBytes = $AES.DecryptCBC($ciphertext, $iv)
+                $message = [Message]::New($receiveBytes, $AES)
             }
+            else
+            {
+                $message = [Message]::New($receiveBytes)
+            }
+            $message.Message | Format-Hex | Out-String | Write-Debug
         }
         catch [System.Exception]
         {
-            Write-Debug "Caught Receive Exception -> $_"
+            if ("TimedOut" -ne $_.Exception.SocketErrorCode)
+            {
+                Write-Debug "Caught Receive Exception -> $_"
+            }
         }
     
         if ($receiveBytes -gt 0)
         {
-            $client.Send($receiveBytes, $receiveBytes.Length, $RemoteIpEndPoint.Address, $RemoteIpEndPoint.Port) | Write-Debug
+            $sendBytes = $encoder.GetBytes($Message)
     
-            $returnData = $encoder.GetString($receiveBytes)
-            if ( $returnData -cmatch '[^\x20-\x7F]' ) {
-                # Found non-printable chars, use base64 to encode.
-                $returnData = [Convert]::ToBase64String($receiveBytes)
+            $sendBytes | Format-Hex | Out-String | Write-Debug
+
+            if ($null -ne $aesKey) 
+            {
+                $sendBytes = [Message]::New($sendBytes).GetEncoded($AES)
             }
             
-            Write-Output "{`"message`":`"$returnData`",`"address`":`"$($RemoteIpEndPoint.Address):$($RemoteIpEndPoint.Port)`"}"
+            $sendBytes | Format-Hex | Out-String | Write-Debug
+
+            $client.Send($sendBytes, $sendBytes.Length, $RemoteIpEndPoint.Address, $RemoteIpEndPoint.Port) | Write-Debug
+    
+            $messageData = $encoder.GetString($message.Message);
+            if ( $messageData -cmatch '[^\x20-\x7F]' ) {
+                # Found non-printable chars, use base64 to encode.
+                $messageData = [Convert]::ToBase64String($messageData)
+            }
+            
+            Write-Output "{`"message`":`"$messageData`",`"address`":`"$($RemoteIpEndPoint.Address):$($RemoteIpEndPoint.Port)`"}"
 
         }
     }

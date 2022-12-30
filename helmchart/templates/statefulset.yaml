@@ -18,12 +18,25 @@ spec:
         image: mcr.microsoft.com/powershell:latest
         command: ["pwsh", "latency-check.ps1", "-server", "-listenPort", "44"]
         workingDir: /scripts
+        command: ["/bin/pwsh"]
+        args: 
+          - -Command
+          - |
+            $PSVersionTable
+            $DebugPreference='Continue'
+            ./latency-check.ps1 -Verbose -server -listenPort 44
         env:
         - name: AES_KEY_B64
           valueFrom:
             secretKeyRef:
-              key: secretkey
-              name: aes-secret
+              key: aes
+              name: ping-secrets
+              optional: true
+        - name: HMAC_KEY_B64
+          valueFrom:
+            secretKeyRef:
+              key: hmac
+              name: ping-secrets
               optional: true
         volumeMounts:
         - name: config-volume
@@ -54,8 +67,9 @@ spec:
         command: ["/bin/pwsh"]
         args: 
           - -Command
-          - | 
+          - |
             $PSVersionTable
+            $DebugPreference='Continue'
             $startTime = Get-Date
             $hostname = Invoke-Expression -Command 'hostname'
             $checkMsg = "${startTime}: ${hostname}@$($PSVersionTable.Platform)"
@@ -76,8 +90,14 @@ spec:
         - name: AES_KEY_B64
           valueFrom:
             secretKeyRef:
-              key: secretkey
-              name: aes-secret
+              key: aes
+              name: ping-secrets
+              optional: true
+        - name: HMAC_KEY_B64
+          valueFrom:
+            secretKeyRef:
+              key: hmac
+              name: ping-secrets
               optional: true
         volumeMounts:
         - name: config-volume
@@ -93,11 +113,17 @@ spec:
 kind: Secret
 apiVersion: v1
 metadata:
-  name: aes-secret
+  name: ping-secrets
 data:
-  {{- $secret := lookup "v1" "Secret" .Release.Namespace "aes-secret" -}}
+  {{- $secret := lookup "v1" "Secret" .Release.Namespace "ping-secrets" -}}
   {{- if $secret -}} {{/*                        Reusing existing password if secret was found... */}}
-  secretkey: {{ $secret.data.secretkey }}
+  aes: {{ $secret.data.aes }}
   {{- else -}} {{/*                               ... otherwise, generate a random key.      */}}
-  secretkey: {{ randAlphaNum 32 | b64enc | b64enc }}
+  aes: {{ randAlphaNum 32 | b64enc | b64enc }}
+  {{- end -}}
+  {{- $secret := lookup "v1" "Secret" .Release.Namespace "ping-secrets" -}}
+  {{- if $secret -}} {{/*                        Reusing existing password if secret was found... */}}
+  hmac: {{ $secret.data.hmac }}
+  {{- else -}} {{/*                               ... otherwise, generate a random key.      */}}
+  hmac: {{ randAlphaNum 16 | b64enc | b64enc }}
   {{- end -}}
