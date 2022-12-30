@@ -19,19 +19,20 @@ data:
     $iv)\n    }\n\n    [byte[]]GetEncoded() {\n        return $this.IV + $this.Message\n
     \   }\n    \n    [byte[]]GetEncoded([System.Security.Cryptography.Aes]$Key) {\n
     \       $this.IV = $Key.IV\n        # return $this.IV + $this.Message\n        return
-    $this.IV + $Key.EncryptCbc($this.Message, $this.iv)\n    }\n}\n\n$AES = [System.Security.Cryptography.Aes]::Create()\n$AES.GenerateIV()\n$AES.Key
-    = $aesKey\n\n$encoder = [system.Text.Encoding]::UTF8\n\nfunction Invoke-Ping {\n
-    \   param (\n        [System.Net.Sockets.UdpClient] $client\n    )\n\n    $sendBytes
-    = $encoder.GetBytes($Message)\n    \n    if ($null -ne $aesKey) \n    {\n        $sendBytes
-    = [Message]::New($sendBytes).GetEncoded($AES)\n    }\n    \n    # Measure the
-    time it takes to send and receive data\n    # Send the message\n    $transmittedBytes
-    = $client.Send($sendBytes, $sendBytes.Length, $SendAddress, $SendPort)\n    $sendBytes
-    | Format-Hex | Out-String | Write-Debug\n    Write-Debug \"$sendAddress $sendPort\"\n
-    \   # Check if the message was sent successfully\n    if ($transmittedBytes -gt
-    0)\n    {\n        $RemoteIpEndPoint = [System.Net.IPEndPoint]::new([System.Net.IPAddress]::Any,
-    0)\n    \n        try\n        {\n            # Receive the response message\n
-    \           $receiveBytes = $client.Receive([ref]$RemoteIpEndPoint);\n\n            #
-    Convert the response message to a string\n            $returnData = $encoder.GetString($receiveBytes);\n
+    $this.IV + $Key.EncryptCbc($this.Message, $this.iv)\n    }\n}\n\n$AES = [System.Security.Cryptography.Aes]::Create()\nif
+    ( $null -ne $AesKey )\n{\n    $AES.GenerateIV()\n    $AES.Key = $aesKey\n}\n\n$encoder
+    = [system.Text.Encoding]::UTF8\n\nfunction Invoke-Ping {\n    param (\n        [System.Net.Sockets.UdpClient]
+    $client\n    )\n\n    $sendBytes = $encoder.GetBytes($Message)\n    \n    if ($null
+    -ne $aesKey) \n    {\n        $sendBytes = [Message]::New($sendBytes).GetEncoded($AES)\n
+    \   }\n    \n    # Measure the time it takes to send and receive data\n    # Send
+    the message\n    $transmittedBytes = $client.Send($sendBytes, $sendBytes.Length,
+    $SendAddress, $SendPort)\n    $sendBytes | Format-Hex | Out-String | Write-Debug\n
+    \   Write-Debug \"$sendAddress $sendPort\"\n    # Check if the message was sent
+    successfully\n    if ($transmittedBytes -gt 0)\n    {\n        $RemoteIpEndPoint
+    = [System.Net.IPEndPoint]::new([System.Net.IPAddress]::Any, 0)\n    \n        try\n
+    \       {\n            # Receive the response message\n            $receiveBytes
+    = $client.Receive([ref]$RemoteIpEndPoint);\n\n            # Convert the response
+    message to a string\n            $returnData = $encoder.GetString($receiveBytes);\n
     \           \n            # Check if the response message contains any non-printable
     characters\n            if ( $returnData -cmatch '[^\\x20-\\x7F]' ) \n            {\n
     \               # Found non-printable chars, use base64 to encode.\n                $returnData
@@ -68,4 +69,5 @@ data:
     \   Start-Sleep 1\n    $checkMsg\n}"
 kind: ConfigMap
 metadata:
+  creationTimestamp: null
   name: ps1-scripts

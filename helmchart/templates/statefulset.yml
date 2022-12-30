@@ -18,9 +18,6 @@ spec:
         image: mcr.microsoft.com/powershell:latest
         command: ["pwsh", "/scripts/loop.ps1"]
         workingDir: /scripts
-        ports:
-        - containerPort: 44
-          name: ping
         volumeMounts:
         - name: config-volume
           mountPath: /scripts

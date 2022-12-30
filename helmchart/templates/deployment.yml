@@ -17,7 +17,10 @@ spec:
     spec:
       containers:
       - image: mcr.microsoft.com/powershell:latest
-        command: ["pwsh", "latency-check.ps1", "-server"]
+        command: ["pwsh", "latency-check.ps1", "-server", "-listenPort", "44"]
+        ports:
+        - containerPort: 44
+          name: ping
         workingDir: /scripts
         name: powershell
         resources: {}
