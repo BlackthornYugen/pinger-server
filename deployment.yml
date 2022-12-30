@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: ping-test
+  name: ping-test
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ping-test
+  strategy: {}
+  template:
+    metadata:
+      labels:
+        app: ping-test
+    spec:
+      containers:
+      - image: mcr.microsoft.com/powershell:latest
+        command: ["pwsh", "latency-check.ps1", "-server"]
+        workingDir: /scripts
+        name: powershell
+        resources: {}
+        volumeMounts:
+        - name: config-volume
+          mountPath: /scripts
+      volumes:
+        - name: config-volume
+          configMap:
+            name: ps1-scripts
+            
+status: {}

@@ -1,0 +1,71 @@
+apiVersion: v1
+data:
+  latency-check.ps1: "#!/usr/bin/env pwsh\n\nParam (\n    # Port number to listen
+    on\n    [int] $ListenPort = 11000,\n    # Port number to send data to\n    [int]
+    $SendPort = 11000,\n    # Timeout in milliseconds for sending data\n    [int]
+    $SendTimeout = 1000,\n    # Timeout in milliseconds for receiving data\n    [int]
+    $ReceiveTimeout = 1000,\n    # Address to send data to\n    [string] $SendAddress
+    = \"127.0.0.1\",\n    # Message to send\n    [string] $Message = \"Hello\",\n
+    \   # key used for integrity / authentication\n    [string] $HmacKey = \"changeit\",\n
+    \   # key used to hide content\n    [byte[]] $AesKey,\n    # switch to run a server\n
+    \   [Alias(\"Server\")]\n    [switch] $RunServer\n)\n\nclass Message {\n    [byte[]]
+    $IV\n    [byte[]] $HMAC\n    [byte[]] $Message\n\n    Message([byte[]]$Message)
+    {\n        $this.IV = New-Object byte[] 16\n        $this.Message = $Message\n
+    \   }\n\n    Message([byte[]]$Message, [System.Security.Cryptography.Aes]$Key)
+    {\n        $this.IV = New-Object byte[] 16\n        $this.Plaintext = New-Object
+    byte[] ($Message.Length - 16)\n        $ciphertext = New-Object byte[] ($Message.Length
+    - 16)\n        [Array]::Copy($this.Message, $Key.IV, 16)\n        [Array]::Copy($this.Message,
+    16, $ciphertext, 0, ($Message.Length - 16))\n        # return $AES.DecryptCBC($ciphertext,
+    $iv)\n    }\n\n    [byte[]]GetEncoded() {\n        return $this.IV + $this.Message\n
+    \   }\n    \n    [byte[]]GetEncoded([System.Security.Cryptography.Aes]$Key) {\n
+    \       $this.IV = $Key.IV\n        # return $this.IV + $this.Message\n        return
+    $this.IV + $Key.EncryptCbc($this.Message, $this.iv)\n    }\n}\n\n$AES = [System.Security.Cryptography.Aes]::Create()\n$AES.GenerateIV()\n$AES.Key
+    = $aesKey\n\n$encoder = [system.Text.Encoding]::UTF8\n\nfunction Invoke-Ping {\n
+    \   param (\n        [System.Net.Sockets.UdpClient] $client\n    )\n\n    $sendBytes
+    = $encoder.GetBytes($Message)\n    \n    if ($null -ne $aesKey) \n    {\n        $sendBytes
+    = [Message]::New($sendBytes).GetEncoded($AES)\n    }\n    \n    # Measure the
+    time it takes to send and receive data\n    # Send the message\n    $transmittedBytes
+    = $client.Send($sendBytes, $sendBytes.Length, $SendAddress, $SendPort)\n    $sendBytes
+    | Format-Hex | Out-String | Write-Debug\n    Write-Debug \"$sendAddress $sendPort\"\n
+    \   # Check if the message was sent successfully\n    if ($transmittedBytes -gt
+    0)\n    {\n        $RemoteIpEndPoint = [System.Net.IPEndPoint]::new([System.Net.IPAddress]::Any,
+    0)\n    \n        try\n        {\n            # Receive the response message\n
+    \           $receiveBytes = $client.Receive([ref]$RemoteIpEndPoint);\n\n            #
+    Convert the response message to a string\n            $returnData = $encoder.GetString($receiveBytes);\n
+    \           \n            # Check if the response message contains any non-printable
+    characters\n            if ( $returnData -cmatch '[^\\x20-\\x7F]' ) \n            {\n
+    \               # Found non-printable chars, use base64 to encode.\n                $returnData
+    = [Convert]::ToBase64String($receiveBytes)\n            }\n        }\n        catch
+    [System.Exception]\n        {\n            Write-Debug \"Caught exception -> $_\"\n
+    \       }\n    }\n}\n\nfunction Start-PingServer {\n    param (\n        [System.Net.Sockets.UdpClient]
+    $client\n    )\n\n    $RemoteIpEndPoint = [System.Net.IPEndPoint]::new([System.Net.IPAddress]::Any,
+    0)\n    while ($true) {\n        $receiveBytes = $null\n        try \n        {\n
+    \           $receiveBytes = $client.Receive([ref]$RemoteIpEndPoint)\n            \n
+    \   \n            if ($null -ne $aesKey) \n            {\n                $iv
+    = New-Object byte[] 16\n                $ciphertext = New-Object byte[] ($receiveBytes.Length
+    - 16)\n                [Array]::Copy($receiveBytes, $iv, 16)\n                [Array]::Copy($receiveBytes,
+    16, $ciphertext, 0, ($receiveBytes.Length - 16))\n                $receiveBytes
+    = $AES.DecryptCBC($ciphertext, $iv)\n            }\n        }\n        catch [System.Exception]\n
+    \       {\n            Write-Debug \"Caught Receive Exception -> $_\"\n        }\n
+    \   \n        if ($receiveBytes -gt 0)\n        {\n            $client.Send($receiveBytes,
+    $receiveBytes.Length, $RemoteIpEndPoint.Address, $RemoteIpEndPoint.Port) | Write-Debug\n
+    \   \n            $returnData = $encoder.GetString($receiveBytes)\n            if
+    ( $returnData -cmatch '[^\\x20-\\x7F]' ) {\n                # Found non-printable
+    chars, use base64 to encode.\n                $returnData = [Convert]::ToBase64String($receiveBytes)\n
+    \           }\n            \n            Write-Output \"{`\"message`\":`\"$returnData`\",`\"address`\":`\"$($RemoteIpEndPoint.Address):$($RemoteIpEndPoint.Port)`\"}\"\n\n
+    \       }\n    }\n}\n\ntry {\n    $client = [System.Net.Sockets.UdpClient]::new($ListenPort)\n
+    \   $client.Client.SendTimeout = $SendTimeout;\n    $client.Client.ReceiveTimeout
+    = $ReceiveTimeout;\n\n    if ( $RunServer ) \n    {\n        Start-PingServer
+    $client\n    }\n    else\n    {\n        Measure-Command { \n            Invoke-Ping
+    $client \n        } | ForEach-Object {\n            Write-Output \"$(Get-Date):
+    $($_.TotalMilliseconds)ms\"\n        }\n    }\n}\nfinally {\n    $client.Close()\n}"
+  loop.ps1: "$startTime = Get-Date\n$hostname = Invoke-Expression -Command 'hostname'\n$checkMsg
+    = \"${startTime}: ${hostname}@$($PSVersionTable.Platform)\"\n$listenPort = Get-Random
+    -Minimum 11000 -Maximum 11999\nwhile ( $true ) \n{ \n    Start-Sleep $((60 - (Get-Date
+    | % Second)) % 15 )\n    $checkMsg = ./latency-check.ps1 `\n        -Message \"$checkMsg\"
+    `\n        -SendAddress centos.jskw.dev `\n        -SendPort 11001 `\n        -ListenPort
+    $listenPort `\n        -AesKey ([System.Convert]::FromBase64String(\"wfK4mf6pWllL/CVwDWFRsRPkbgodzU7H0sMOQ8e8fAo=\"))\n
+    \   Start-Sleep 1\n    $checkMsg\n}"
+kind: ConfigMap
+metadata:
+  name: ps1-scripts
