@@ -18,13 +18,20 @@ spec:
         image: mcr.microsoft.com/powershell:latest
         command: ["pwsh", "latency-check.ps1", "-server", "-listenPort", "44"]
         workingDir: /scripts
+        env:
+        - name: AES_KEY_B64
+          valueFrom:
+            secretKeyRef:
+              key: secretkey
+              name: aes-secret
+              optional: true
         volumeMounts:
         - name: config-volume
           mountPath: /scripts
       volumes:
         - name: config-volume
           configMap:
-            name: ps1-scripts
+            name: {{ $.Release.Name }}-pwsh-scripts
 ---
 apiVersion: apps/v1
 kind: StatefulSet
@@ -60,16 +67,37 @@ spec:
                     -Message "$checkMsg" `
                     -SendAddress {{ $.Release.Name }}-server `
                     -SendPort 44 `
-                    -ListenPort $listenPort `
-                    -AesKey ([System.Convert]::FromBase64String("wfK4mf6pWllL/CVwDWFRsRPkbgodzU7H0sMOQ8e8fAo="))
+                    -ListenPort $listenPort
                 Start-Sleep 1
                 $checkMsg
             }
         workingDir: /scripts
+        env:
+        - name: AES_KEY_B64
+          valueFrom:
+            secretKeyRef:
+              key: secretkey
+              name: aes-secret
+              optional: true
         volumeMounts:
         - name: config-volume
           mountPath: /scripts
       volumes:
         - name: config-volume
           configMap:
-            name: ps1-scripts
+            name: {{ $.Release.Name }}-pwsh-scripts
+---
+# Google helm create secret if not exists
+# found https://stackoverflow.com/a/61715870/2535649
+# links to https://github.com/sankalp-r/helm-charts-examples/blob/main/sample_chart/templates/_helpers.tpl
+kind: Secret
+apiVersion: v1
+metadata:
+  name: aes-secret
+data:
+  {{- $secret := lookup "v1" "Secret" .Release.Namespace "aes-secret" -}}
+  {{- if $secret -}} {{/*                        Reusing existing password if secret was found... */}}
+  secretkey: {{ $secret.data.secretkey }}
+  {{- else -}} {{/*                               ... otherwise, generate a random key.      */}}
+  secretkey: {{ randAlphaNum 32 | b64enc | b64enc }}
+  {{- end -}}

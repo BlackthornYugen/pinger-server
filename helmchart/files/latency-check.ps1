@@ -22,6 +22,11 @@ Param (
     [switch] $RunServer
 )
 
+if ( ($null -eq $AesKey) -and ($null -ne $ENV:AES_KEY_B64) )
+{
+    $AesKey = [System.Convert]::FromBase64String($ENV:AES_KEY_B64)
+}
+
 class Message {
     [byte[]] $IV
     [byte[]] $HMAC
