@@ -29,9 +29,7 @@ class Message {
     [byte[]] $Message
 
     Message([byte[]]$Message) {
-        $hmacsha = New-Object System.Security.Cryptography.HMACSHA256
-        $hmacsha.key = [Text.Encoding]::ASCII.GetBytes($ENV:HMAC_KEY_B64)
-        $this.HMAC = $hmacsha.ComputeHash([Text.Encoding]::ASCII.GetBytes($message))
+        $this.HMAC = $this.ComputeHMAC($Message)
         $this.IV = New-Object byte[] 16
         $this.Message = $Message
     }
@@ -47,6 +45,21 @@ class Message {
         [Array]::Copy($Message, $msgOffset,     $ciphertext, 0, $Message.Length - $msgOffset)
 
         $this.Message = $Key.DecryptCBC($ciphertext, $this.IV)
+
+        $computedHMAC = $this.ComputeHMAC($ciphertext)
+        $diff = Compare-Object $this.HMAC $computedHMAC
+        if ( $diff.Length -ne 0 ) {
+            Write-Warning "HMAC Check: FAIL"
+            $this.HMAC    | Format-Hex | Out-String | Write-Debug
+            $computedHMAC | Format-Hex | Out-String | Write-Debug
+        }
+    }
+
+    [byte[]]ComputeHMAC([byte[]]$Message) {
+        $hmacsha = New-Object System.Security.Cryptography.HMACSHA256
+        $hmacsha.key = [Text.Encoding]::ASCII.GetBytes($ENV:HMAC_KEY_B64)
+        $computedHMAC = $hmacsha.ComputeHash([Text.Encoding]::ASCII.GetBytes($message))
+        return $computedHMAC
     }
 
     [byte[]]GetEncoded() {
@@ -55,7 +68,9 @@ class Message {
     
     [byte[]]GetEncoded([System.Security.Cryptography.Aes]$Key) {
         $this.IV = $Key.IV
-        return $this.IV + $this.HMAC + $Key.EncryptCbc($this.Message, $this.iv)
+        $ciphertext = $Key.EncryptCbc($this.Message, $this.iv)
+        $this.HMAC = $this.ComputeHMAC($ciphertext)
+        return $this.IV + $this.HMAC + $ciphertext
     }
 }
 
