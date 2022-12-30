@@ -16,7 +16,6 @@ spec:
       containers:
       - name: ping-server
         image: mcr.microsoft.com/powershell:latest
-        command: ["pwsh", "latency-check.ps1", "-server", "-listenPort", "44"]
         workingDir: /scripts
         command: ["/bin/pwsh"]
         args: 
