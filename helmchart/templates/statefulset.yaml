@@ -1,0 +1,75 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $.Release.Name }}-server
+spec:
+  selector:
+    matchLabels:
+      app: {{ $.Release.Name }}-server
+  serviceName: ping-server
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: {{ $.Release.Name }}-server
+    spec:
+      containers:
+      - name: ping-server
+        image: mcr.microsoft.com/powershell:latest
+        command: ["pwsh", "latency-check.ps1", "-server", "-listenPort", "44"]
+        workingDir: /scripts
+        volumeMounts:
+        - name: config-volume
+          mountPath: /scripts
+      volumes:
+        - name: config-volume
+          configMap:
+            name: ps1-scripts
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $.Release.Name }}-client
+spec:
+  selector:
+    matchLabels:
+      app: {{ $.Release.Name }}-client
+  serviceName: ping-client
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: {{ $.Release.Name }}-client
+    spec:
+      containers:
+      - name: {{ $.Release.Name }}-client
+        image: mcr.microsoft.com/powershell:latest
+        command: ["/bin/pwsh"]
+        args: 
+          - -Command
+          - | 
+            $PSVersionTable
+            $startTime = Get-Date
+            $hostname = Invoke-Expression -Command 'hostname'
+            $checkMsg = "${startTime}: ${hostname}@$($PSVersionTable.Platform)"
+            $listenPort = Get-Random -Minimum 11000 -Maximum 11999
+            while ( $true ) 
+            { 
+                Start-Sleep $((60 - (Get-Date | % Second)) % 15 )
+                $checkMsg = ./latency-check.ps1 `
+                    -Message "$checkMsg" `
+                    -SendAddress {{ $.Release.Name }}-server `
+                    -SendPort 44 `
+                    -ListenPort $listenPort `
+                    -AesKey ([System.Convert]::FromBase64String("wfK4mf6pWllL/CVwDWFRsRPkbgodzU7H0sMOQ8e8fAo="))
+                Start-Sleep 1
+                $checkMsg
+            }
+        workingDir: /scripts
+        volumeMounts:
+        - name: config-volume
+          mountPath: /scripts
+      volumes:
+        - name: config-volume
+          configMap:
+            name: ps1-scripts
