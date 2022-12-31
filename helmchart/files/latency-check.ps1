@@ -67,6 +67,7 @@ class Message {
     }
     
     [byte[]]GetEncoded([System.Security.Cryptography.Aes]$Key) {
+        $Key.GenerateIV()
         $this.IV = $Key.IV
         $ciphertext = $Key.EncryptCbc($this.Message, $this.iv)
         $this.HMAC = $this.ComputeHMAC($ciphertext)
@@ -77,7 +78,6 @@ class Message {
 $AES = [System.Security.Cryptography.Aes]::Create()
 if ( $null -ne $AesKey )
 {
-    $AES.GenerateIV()
     $AES.Key = $AesKey
 }
 
